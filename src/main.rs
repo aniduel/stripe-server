@@ -12,6 +12,7 @@ use axum::{
 };
 use redis::AsyncCommands;
 use tokio::sync::broadcast;
+use tracing::{info, debug, warn};
 
 use config::Config;
 use routes::webhook_post;
@@ -37,6 +38,8 @@ pub struct State(broadcast::Sender<String>);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let conf: Config = toml::from_str(&fs::read_to_string("config.toml")?)?;
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
@@ -57,10 +60,11 @@ async fn main() -> anyhow::Result<()> {
             let message = rx.recv().await;
 
             if let Ok(message) = message {
+                debug!("Sending message: {message}");
                 let rslt: Result<redis::Value, redis::RedisError> =
                     conn.publish("stripe:1", message).await;
                 if let Err(rslt) = rslt {
-                    println!("Error sending ipc message {}", rslt);
+                    warn!("Error sending ipc message {}", rslt);
                 }
             }
         }
@@ -70,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/stripe", post(webhook_post))
         .layer(Extension(state));
 
+    info!("Serving...");
     Server::bind(&addr)
         .serve(router.into_make_service())
         .await?;
